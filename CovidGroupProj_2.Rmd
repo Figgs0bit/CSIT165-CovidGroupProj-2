@@ -45,9 +45,9 @@ library(data.table)
 library(ggrepel)
 library(scales)
 library(stringr)
+library(leaflet)
 
 knitr::opts_chunk$set(echo=TRUE)
-
 ```
 
 
@@ -66,7 +66,6 @@ knitr::opts_chunk$set(echo=TRUE)
 *For this project, we will use ALL of the data sets provided in this GitHub repository. These include global data sets for COVID-19 associated confirmations and deaths as well as COVID-19 data sets associated with confirmations and deaths for cities in the US.*
 
 
-**This lab represents data downloaded on 04/xx/2025**
 
 [2019 Novel Coronavirus COVID-19 (2019-nCoV) Data Repository by John Hopkins CSSE](https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series)
 
@@ -82,17 +81,40 @@ knitr::opts_chunk$set(echo=TRUE)
 ### Data Load
 
 ```{r Data load}
-#print("Lab represents data download May 4th, 2025")
+print("Lab represents data download May 20th, 2025")
 
-#time_series_covid19_confirmed_US.csv 1154 columns, 289 rows.
-#Confirmed_Global <- as.data.frame(read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/refs/heads/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"))
+#time_series_covid19_confirmed_global.csv
+confirmed_global <- as.data.frame(read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/refs/heads/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"))
 
-#Serve as data frame length and width variables if needed
-#rowmax <- nrow(Confirmed_Global[,]) #limit Qty of Rows 289
-#colmax <- ncol(Confirmed_Global[,]) #limit Qty of Rows 1147
+#time_series_covid19_deaths_global.csv
+deaths_global <- as.data.frame(read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/refs/heads/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"))
+
+#time_series_covid19_confirmed_global.csv
+confirmed_US <- as.data.frame(read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/refs/heads/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv"))
+
+#time_series_covid19_deaths_global.csv
+PopDeaths_US <- as.data.frame(read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/refs/heads/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv"))
+
+#Renames Deaths_US data frame to PopDeaths
+deaths_US <- data.frame(PopDeaths_US)
+
+#loads the population column from data frame Deaths_US
+popCounties <- deaths_US[12]
+
+#Population colum removed from Deaths_US dataframe
+deaths_US <- deaths_US[, -which(names(deaths_US) == "Population")]
+
+#Serve as data frame length and width variables
+USrowmax <- nrow(confirmed_US[,]) #limit Qty of Rows 3342
+UScolmax <- ncol(confirmed_US[,]) #limit Qty of Cols 1154
+
+GloRowmax <- nrow(confirmed_global[,]) #limit Qty of Rows 289
+GloColmax <- ncol(confirmed_global[,]) #limit Qty of Cols 1147
+
 
 #loads column headers in data.frame
-#NameCol <- as.data.frame(colnames(Confirmed_Global))
+GNameCol <- as.data.frame(colnames(confirmed_global))
+DNameCol <- as.data.frame(colnames(deaths_global))
 
 #Var holds the length of the NameCol data.frame
 #MAXNameCol <- nrow(NameCol)
@@ -100,15 +122,6 @@ knitr::opts_chunk$set(echo=TRUE)
 #Name of the final column name
 #FinalColName <- NameCol[MAXNameCol,] 
 
-#Loads the URL of the .RData file in the GitHub repository
-#GitHuburl <- "https://github.com/Figgs0bit/CSIT165-ModData/raw/refs/heads/master/Module-13/human_proteins.RData"
-#names the download for the *.Rdata file.
-#RdataFile <- "human_proteins.RData"
-
-#Download the file into the working directory, Note: mode-WB needed to download binary .rdata file.
-#download.file(GitHuburl, RdataFile, mode = "wb")
-#Load the .RData file from working directory into the R environment
-#load(RdataFile)
 ```
 
 
@@ -129,8 +142,81 @@ knitr::opts_chunk$set(echo=TRUE)
 
 *Customize the map to reflect the differences in magnitude for confirmations and deaths. In the example map below, circle markers that are blue represent low values, gray represents neutral values, and red represents high values. Low, middle, and high values were categorized to aesthetically map the markers based on their probabilistic distribution using the quartile function. You may use any method you like so that it is logical and allows visualization of value intensity. As well, customize the map to include hover labels that indicate country names and popup labels to show the value of confirmations and deaths for that country. For extra help using leaflet, consult this website along with the information provided in your textbooks.*
 
+
 ```{r ob1}
 
+confirmed <- confirmed_global
+deaths <- deaths_global
+
+# Extract the most recent date column
+latest_date <- tail(names(confirmed), 1)
+
+# Summarize data by country
+summary_data <- confirmed %>%
+  group_by(Country.Region) %>%
+  summarise(
+    Total_Confirmed = sum(!!sym(latest_date), na.rm = TRUE),
+    Mean_Lat = mean(Lat, na.rm = TRUE),
+    Mean_Long = mean(Long, na.rm = TRUE)
+  ) %>%
+  left_join(deaths %>%
+      group_by(Country.Region) %>%
+      summarise(Total_Deaths = sum(!!sym(latest_date), na.rm = TRUE)), by = "Country.Region"
+  )
+
+
+# Categorize data into low, medium, and high based on quartiles
+summary_data <- summary_data %>%
+  mutate(
+    Confirmed_Category = cut(
+      Total_Confirmed,
+      breaks = quantile(Total_Confirmed, probs = c(0, 0.25, 0.75, 1), na.rm = TRUE),
+      labels = c("Low", "Medium", "High"),
+      include.lowest = TRUE
+    ),
+    Deaths_Category = cut(
+      Total_Deaths,
+      breaks = quantile(Total_Deaths, probs = c(0, 0.25, 0.75, 1), na.rm = TRUE),
+      labels = c("Low", "Medium", "High"),
+      include.lowest = TRUE
+    )
+  )
+
+# Define color palette for Confirmed and Deaths
+confirmed_palette <- colorFactor(c("blue", "gray", "red"), levels = c("Low", "Medium", "High"))
+deaths_palette <- colorFactor(c("lightblue", "lightgray", "darkred"), levels = c("Low", "Medium", "High"))
+
+# Create the leaflet map
+map <- leaflet(summary_data) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    ~Mean_Long, ~Mean_Lat,
+    label = ~paste(Country.Region),
+    popup = ~paste0(
+      "<strong>", Country.Region, "</strong><br>",
+      "Total Confirmed: ", Total_Confirmed, "<br>",
+      "Total Deaths: ", Total_Deaths
+    ),
+    color = ~confirmed_palette(Confirmed_Category),
+    radius = ~sqrt(Total_Confirmed) / 10,
+    group = "Confirmed"
+  ) %>%
+  addCircleMarkers(
+    ~Mean_Long, ~Mean_Lat,
+    label = ~paste(Country.Region),
+    popup = ~paste0(
+      "<strong>", Country.Region, "</strong><br>",
+      "Total Confirmed: ", Total_Confirmed, "<br>",
+      "Total Deaths: ", Total_Deaths
+    ),
+    color = ~deaths_palette(Deaths_Category),
+    radius = ~sqrt(Total_Deaths) / 10,
+    group = "Deaths"
+  ) %>%
+  addLayersControl(
+    overlayGroups = c("Confirmed", "Deaths"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
 
 ```
 
@@ -142,7 +228,7 @@ knitr::opts_chunk$set(echo=TRUE)
 
 ```
 
-##Objective 3 *- Zooming Into Our State*
+## Objective 3 *- Zooming Into Our State*
 *After reading the top tables, you are stunned! The US overtakes every other country in terms of COVID-19 confirmations. As such, you are concerned about the state you live in and would like to understand how COVID-19 events have shaped the trajectory of the disease. Create two scatter plots to gain a better understanding. The first scatter plot should be California’s trajectory for confirmations. The second scatter plot should show California’s top three city trajectories for confirmations. You are interested in studying how the vaccine affected the number of confirmations. The Moderna vaccine was first available as an emergency use authorized (EUA) vaccine and required two shots spaced six weeks apart. Indicate on the plots the day the second dosage was given to those that received the first dosage the day Moderna was EUA (January 29th, 2021). As a diligent scientist that knows that new COVID variants have mutations in the spike protein (the region that the vaccine was developed for), you also want to study how confirmation rates change as new variants become the dominant infectious strain. Indicate on the plots when the delta and omicron variants became the dominant strain in California (May 11th, 2021 and November 26th, 2021 respectively). In the example below, the function plot_grid from the R package cowplot was to organize the graphs into a grid to more easily compare statewide vs top city plots.*
 
 ```{r ob3}
@@ -158,16 +244,11 @@ knitr::opts_chunk$set(echo=TRUE)
 
 ```
 
+## GitHub Log
+
+```{bash gitlog} 
+git log --pretty=format:"%nSubject: %s%nAuthor: %aN%nDate: %aD%nBody: %b"
+```
 
 
--------------------------------------------------------------------------------
 
-Instructions
-*The Global Health Initiative has recently employed a new data science response team, CSIT-165, that uses data science to characterize pandemic diseases. CSIT-165 disseminates data driven analyses to global and local decision makers.*
-
-*CSIT-165 is a conglomerate comprised of two fabricated entities: World Health Organization (WHO) and U.S. Pandemic Response Team (USPRT). Your and your partner’s role is to play a data scientist from one of these two entities. Discuss with your partner to decide who will be part of WHO and USPRT.*
-
-Getting Started
-*One project member per group must create a new repository on GitHub. Initialize this repository with a readme.md file that lists each member of the group. If your group decides to collaborate using a centralized workflow (recommended), then the project member that created the repository must declare their partners as collaborators in GitHub. Each project member will clone this repository onto their machine using RStudio. In RStudio, create a project from version control with GitHub using the HTTP address of the repository created by project member.*
-
-*All project members must first contribute to analyses by uploading data sets respective to the entity they belong to in the CSIT-165 data science response team. If you belong to WHO then you are responsible for providing code necessary to download the global data sets and if you are assigned to USPRT then you are responsible for providing code necessary to download the US data sets.*
