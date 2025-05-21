@@ -138,49 +138,121 @@ DNameCol <- as.data.frame(colnames(deaths_global))
 
 
 ```{r ob1}
-#Initiate Buffer variable
+
+#Initiates new dataframe var, serves as a Buffer variable for downloaded Data Frames.
 confirmed <- confirmed_global
 deaths <- deaths_global
 
-# Extract the most recent date column
+#Pulls out the most recent date column of data for confirmed
 latest_date <- tail(names(confirmed), 1)
 
 
+#dplyr pipe using confirmed data frame then loads to summary_data.
 summary_data <- confirmed %>%
+    #Groups the data by the Country.Region column.
     group_by(Country.Region) %>%
+    #Sums the confirmed cases for the latest date across all rows for that country.
+    #Sym() converts string from latest_date to a column using tidy.  
     summarise(Total_Confirmed = sum(!!sym(latest_date), na.rm = TRUE),
-    Mean_Lat = mean(Lat, na.rm = TRUE), Mean_Long = mean(Long, na.rm = TRUE)) %>%
+    #Calculates the average (mean) latitude (Mean_Lat) and longitude (Mean_Long) for each country.
+    #Then these averages to be used to plot a country on a map.
+    Mean_Lat = mean(Lat, na.rm = TRUE), Mean_Long = mean(Long, na.rm = TRUE)) %>% 
+    #left join with deaths data frame, adds death totals to the summary table.
     left_join(deaths %>%
+    #Groups deaths by country
     group_by(Country.Region) %>%
+    #creates Total_Deaths column, Summarises the deaths for latest date per country.
     summarise(Total_Deaths = sum(!!sym(latest_date), na.rm = TRUE)), by = "Country.Region")
 
+
+
+#This code adds two new columns to summary_data, placing each row into a "Low", "Medium", or "High" category for both total confirmed cases and total deaths, using quartiles as the boundaries.
+
+#dplyr pipe modifies summary_data and stores back into summary_data.
 summary_data <- summary_data %>%
-    mutate(Confirmed_Category = cut(Total_Confirmed, breaks = quantile(Total_Confirmed, probs = c(0, 0.25, 0.75, 1), na.rm = TRUE), 
-    labels = c("Low", "Medium", "High"),include.lowest = TRUE), Deaths_Category = cut(Total_Deaths, breaks = quantile(Total_Deaths, 
-    probs = c(0, 0.25, 0.75, 1), na.rm = TRUE), labels = c("Low", "Medium", "High"), include.lowest = TRUE))
+    #mutate() function adds column Confirmed_Category to data frame taken from cut() applied to Total_Confirmed.
+    mutate(Confirmed_Category = cut(Total_Confirmed, 
+    #break points for cut() function quantile() computes the break points based Total_Confirmed distribution.
+    breaks = quantile(Total_Confirmed,
+    #Points quantile() to use 0,25,50,100% ratios in decimal form. This creates (3) intervals.                     
+    probs = c(0, 0.25, 0.5, 1), 
+    #Ignore (NA) values in data.
+    na.rm = TRUE), 
+    #Low(bottom 25%),Medium(middle 50%), High(top 25%).    
+    labels = c("Low", "Medium", "High"), 
+    #Include lowest value of Total_Confirmed in the "Low" interval.
+    include.lowest = TRUE), 
+    #Adds Deaths_Category column, cut() function divides Total_Deaths vector.
+    Deaths_Category = cut(Total_Deaths,
+    #Breaks, quantile() function splits along percentages previously defined.
+    #distributes each country/row Total_Deaths to (Low, Medium, High) categories.
+    breaks = quantile(Total_Deaths,
+    #Points quantile() to use 0,25,50,100% ratios in decimal form. This creates (3) intervals.                     
+    probs = c(0, 0.25, 0.5, 1),
+    #Ignore (NA) values in data.
+    na.rm = TRUE),
+    #Low(bottom 25%),Medium(middle 50%), High(top 25%).
+    labels = c("Low", "Medium", "High"), 
+    #Include lowest value of Total_Confirmed in the "Low" interval.
+    include.lowest = TRUE)) 
 
 
-# Define color palette for Confirmed and Deaths
-confirmed_palette <- colorFactor(c("blue", "gray", "red"), levels = c("Low", "Medium", "High"))
-deaths_palette <- colorFactor(c("lightblue", "lightgray", "darkred"), levels = c("Low", "Medium", "High"))
+#Defines colors for low, med, high categories for Confirmed and Deaths
+confirmed_palette <- colorFactor(c("blue", "green", "purple"), levels = c("Low", "Medium", "High"))
+deaths_palette <- colorFactor(c("red", "orange", "yellow"), levels = c("Low", "Medium", "High"))
 
 
-# Create the leaflet map
+
+#Create the leaflet map
+#Initializes a Leaflet map object using the summary_data data frame as the data source.
+#The resulting map object will be assigned to the variable map.
 map <- leaflet(summary_data) %>%
+
+    #Adds the default OpenStreetMap tile layer as the background of the map.
+    #This provides the geographical context (roads, countries, etc.) for all markers.  
     addTiles() %>%
   
-    addCircleMarkers(~Mean_Long, ~Mean_Lat, label = ~paste(Country.Region), popup = ~paste0("<strong>", Country.Region, "</strong><br>",
-    "Total Confirmed: ", Total_Confirmed, "<br>", "Total Deaths: ", Total_Deaths),
-    color = ~confirmed_palette(Confirmed_Category), radius = ~sqrt(Total_Confirmed) / 10, group = "Confirmed") %>%
   
-    addCircleMarkers(~Mean_Long, ~Mean_Lat, label = ~paste(Country.Region), popup = ~paste0("<strong>", Country.Region, 
-    "</strong><br>", "Total Confirmed: ", Total_Confirmed, "<br>", "Total Deaths: ", 
-    Total_Deaths), color = ~deaths_palette(Deaths_Category), radius = ~sqrt(Total_Deaths) / 10, group = "Deaths") %>%
+    #Adds circle markers for confirmed cases:
+    #Mean_Long, ~Mean_Lat: Places each marker at the average longitude and latitude for each country.
+    #label = ~paste(Country.Region): Displays the country name when you hover over the marker.
+    #popup = ~paste0(...): Shows a popup containing the country name, total confirmed, and total deaths when the marker is clicked.
+    #color = ~confirmed_palette(Confirmed_Category): Colors the marker according to the country's confirmed cases category ("Low", "Medium", "High").
+    #radius = ~sqrt(Total_Confirmed) / 10: Sets the marker's size proportional to the square root of total confirmed cases, scaled for visibility.
+    #group = "Confirmed": Assigns these markers to the "Confirmed" group for later toggling.
+    addCircleMarkers(~Mean_Long, ~Mean_Lat,
+                     
+    label = ~paste(Country.Region), 
+    
+    popup = ~paste0("<strong>", Country.Region, "</strong><br>", "Total Confirmed: ", Total_Confirmed, "<br>", "Total Deaths: ", Total_Deaths),
+    
+    color = ~confirmed_palette(Confirmed_Category), 
+    
+    radius = ~sqrt(Total_Confirmed) / 300,
+    
+    group = "Confirmed") %>%
   
+
+    #Adds a second set of circle markers for deaths:
+    #Same geographic placement (~Mean_Long, ~Mean_Lat) and same label/popup as before.
+    #color = ~deaths_palette(Deaths_Category): Colors each marker by deaths category ("Low", "Medium", "High").
+    #radius = ~sqrt(Total_Deaths) / 10: Size scales with square root of total deaths.
+    #group = "Deaths": Assigns these markers to the "Deaths" group, distinct from confirmed cases.
+    addCircleMarkers(~Mean_Long, ~Mean_Lat, label = ~paste(Country.Region), 
+                     
+    popup = ~paste0("<strong>", Country.Region, "</strong><br>", "Total Confirmed: ", Total_Confirmed, "<br>", "Total Deaths: ", Total_Deaths), 
+    
+    color = ~deaths_palette(Deaths_Category), 
+    
+    radius = ~sqrt(Total_Deaths) / 300, 
+    
+    group = "Deaths") %>%
+  
+  
+    #Allows user to toggle between Confirmed and Deaths points on map.
     addLayersControl(overlayGroups = c("Confirmed", "Deaths"), options = layersControlOptions(collapsed = FALSE))
 
-#Prints map
-map
+map #Prints Interactive map
 ```
 
 ## Objective 2 *- Narrowing Down Hot Spots*
@@ -213,7 +285,46 @@ Generate an R code Program that creates a scatter plot similar to ob4 pic a.png 
 
 ```{r ob4}
 
+confirmed <- confirmed_US
+deaths <- deaths_US
 
+last_date_col_confirmed <- tail(grep("^X", names(confirmed), value = TRUE), 1)
+
+confirmed_summary <- confirmed %>%
+    select(UID, Admin2, Province_State, Population = Population, Confirmed = all_of(last_date_col_confirmed))
+
+
+last_date_col_deaths <- tail(grep("^X", names(deaths), value = TRUE), 1)
+
+deaths_summary <- deaths %>%
+    select(UID, Deaths = all_of(last_date_col_deaths))
+
+
+
+merged <- confirmed_summary %>%
+    left_join(deaths_summary, by = "UID") %>%
+    filter(!is.na(Population), Population > 0, Confirmed > 0, Deaths > 0) # Only keep rows with data and all values > 0
+
+
+
+p1 <- ggplot(merged, aes(x = Population, y = Confirmed)) +
+    geom_point(color = "#113344", alpha = 0.5) +
+    scale_x_log10(labels = comma) +
+    scale_y_log10(labels = comma) +
+    labs(title = "Confirmations Vs. Population", x = "Population", y = "Confirmation Counts") +
+    #theme_minimal(base_size = 16)
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+p2 <- ggplot(merged, aes(x = Confirmed, y = Deaths)) +
+    geom_point(color = "#880000", alpha = 0.5) +
+    scale_x_log10(labels = comma) +
+    scale_y_log10(labels = comma) +
+    labs(title = "Deaths Vs. Confirmations", x = "Confirmed Counts", y = "Death Counts") +
+    #theme_minimal(base_size = 16)
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+grid.arrange(p1, p2, nrow = 1)
 
 ```
 
